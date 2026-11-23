@@ -1,0 +1,8 @@
+.env
+__pycache__/
+.stt-upload*
+/녹음/
+/새녹음/
+/결과/
+/transcripts/
+/results/
