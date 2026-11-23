@@ -77,6 +77,13 @@ def infer_recording_date(filename: str, fallback: date | None = None) -> date:
     return fallback or date.today()
 
 
+def infer_counterparty(filename: str) -> str | None:
+    """Infer the other company from the recording filename when available."""
+    stem = Path(filename).stem
+    match = re.match(r"^영업통화_(.+?)_(?:20\d{6}|\d{4})$", stem)
+    return match.group(1).strip() if match else None
+
+
 def transcribe_path(path: Path) -> dict[str, Any]:
     started = time.perf_counter()
     model = get_model()
@@ -124,16 +131,17 @@ def analyze_transcript(result: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError("OPENAI_API_KEY가 설정되어 있지 않습니다.")
     transcript = "\n".join(f"{row['timestamp']} {row['text']}" for row in result["segments"])
     meeting_date = result["recording_date"]
+    counterparty_hint = result.get("counterparty_hint") or "파일명과 녹취에서 확인"
     client = OpenAI().responses.create(
         model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
         input=[
-            {"role": "system", "content": "당신은 한국어 영업 통화 회의록 정리 담당자입니다. 녹취에 없는 내용을 추측하지 마세요. 거래처명, 요약, 결정 사항, To-Do를 정확히 추출하세요. 기한이 상대 표현이면 미팅 날짜를 기준으로 YYYY-MM-DD로 계산하고, 없으면 null로 하세요."},
-            {"role": "user", "content": f"미팅 날짜: {meeting_date}\n\n녹취:\n{transcript}"},
+            {"role": "system", "content": "당신은 한국어 영업 통화 회의록 정리 담당자입니다. 우리 회사는 한결오피스입니다. 거래처(client)는 반드시 한결오피스가 아닌 통화 상대 회사명을 넣으세요. 녹취에 없는 내용을 추측하지 마세요. 거래처명, 요약, 결정 사항, To-Do를 정확히 추출하세요. 기한이 상대 표현이면 미팅 날짜를 기준으로 YYYY-MM-DD로 계산하고, 없으면 null로 하세요."},
+            {"role": "user", "content": f"미팅 날짜: {meeting_date}\n파일명에서 추정한 통화 상대 회사: {counterparty_hint}\n\n녹취:\n{transcript}"},
         ],
         text={"format": {"type": "json_schema", "name": "meeting_record", "strict": True, "schema": MEETING_SCHEMA}},
     )
     data = json.loads(client.output_text)
-    return {"client": data["client"], "summary": data["summary"], "decisions": data["decisions"], "todos": data["todos"]}
+    return {"client": counterparty_hint if result.get("counterparty_hint") else data["client"], "summary": data["summary"], "decisions": data["decisions"], "todos": data["todos"]}
 
 
 def database_url() -> str | None:
@@ -173,6 +181,7 @@ def process_path(path: Path, display_filename: str | None = None) -> dict[str, A
     if display_filename:
         result["filename"] = display_filename
         result["recording_date"] = infer_recording_date(display_filename).isoformat()
+    result["counterparty_hint"] = infer_counterparty(result["filename"])
     try:
         analysis = analyze_transcript(result)
         result["analysis"] = analysis
