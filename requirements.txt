@@ -1,8 +1,5 @@
 fastapi
-uvicorn[standard]
 python-multipart
-faster-whisper
-torch
 openai
-python-dotenv
 psycopg[binary]
+python-dotenv
